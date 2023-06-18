@@ -14,7 +14,7 @@ knitr::opts_chunk$set(echo = FALSE)
 knitr::opts_chunk$set(include = FALSE)
 ```
 
-```{css echo=FALSE, include=TRUE}
+```{css echo = FALSE, include = TRUE}
 /* Although tables are aligned to the left page border, offset this to the right. */
 table {
   margin-left: 30px;
