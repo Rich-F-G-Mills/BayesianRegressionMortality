@@ -828,7 +828,7 @@ stanModel <-
       save_dso = TRUE,
       auto_write = TRUE
     )
-  }, hash = list(stanCode))
+  }, hash = list(stanCode), dir = 'cache/')
 ```
 
 ```{r getModelMatrix}
@@ -872,7 +872,7 @@ stanFit <-
           D_actual = polData$ACTUAL_DEATHS
         )
     )
-  }, hash = list(stanCode, priorParams))
+  }, hash = list(stanCode, priorParams), dir = 'cache/')
 ```
 
 ```{r extractStanSamples}
