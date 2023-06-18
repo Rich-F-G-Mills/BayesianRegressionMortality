@@ -125,7 +125,8 @@ polData <-
     GENDER_ALT = GENDER,
     HEALTH_ALT = HEALTH,
     OCC_RISK_ALT =
-      factor(OCC_RISK, levels = c('LOW', 'MEDIUM', 'HIGH'), ordered = TRUE),
+      OCC_RISK %>%
+      factor(levels = c('LOW', 'MEDIUM', 'HIGH'), ordered = TRUE),
     EXPOSURE =
       as.integer(totalRecords * PROPORTION),
     ACTUAL_DEATHS =
@@ -143,16 +144,18 @@ polData <-
 
 ## Purpose
 
-The purpose of this note is to show how **Bayesian regression** can be used to provide a credibility weighted approach to experience analysis.
+The purpose of this note is to show how **Bayesian regression** can be used to provide a credibility weighted approach to the analysis of mortality experience.
+
+Using a fabricated data-set, the analysis is firstly performed using a GLM approach, before repeating the exercise in a Bayesian setting; the former being done (if nothing else) to better highlight the benefit of the latter.
 
 
 ## Background
 
-Although it might depend on the product being considered, proposed basis changes are made by (at least) considering multiple 1-way analyses of actual vs expected experience. Prior to any proposed changes, a "mechanical-rule" process is applied to determine whether any such departure to expected experience is sufficient enough to warrant a change in basis. (**Correct?**).
+For some products/basis items, proposed basis changes are made by (at least) considering multiple one-way analyses of actual vs expected experience. Prior to any proposed changes, a "mechanical-rule" process is applied to determine whether any such departure to expected experience is sufficient enough to warrant a change in basis. (**Correct?**).
 
 However, one shortcoming with this approach (in the author's opinion) is that this rule is only being applied when considering individual one-way analyses of results. For example, deciding to not change the gender loading could mean that another assumption could well need to change to compensate for any such (no) change.
 
-Ideally, any such adjustment should be done considering all basis dimensions simultaneously. Through the use of Bayesian regression, we can obtain credibility weighted estimates that:
+Ideally, any such adjustment should be done considering all basis dimensions simultaneously. Through the use of Bayesian regression (as opposed to a "vanilla" GLM regression), we can obtain credibility weighted estimates that:
 
 * Considers **all** basis dimensions (eg... gender, occupation, ...) simultaneously.
 * Reflects the amount of exposure underlying corresponding cells.
@@ -330,7 +333,9 @@ With a suitable GLM model specified, we can determine "best-fit" adjustments by 
 
 Specifically, we would like to find $\mu_{BASE}^{ADJ}$, $G_i^{ADJ}$, $H_i^{ADJ}$ and $O_i^{ADJ}$ that maximizes the likelihood of:
 
-$$D_i \sim \operatorname{Poisson}(\lambda = \color{red}{E_i} \cdot \color{red}{\mu_i} \cdot \mu_{BASE}^{ADJ} \cdot G_i^{ADJ} \cdot H_i^{ADJ} \cdot O_i^{ADJ})$$
+$$D_i \sim \operatorname{Poisson}(\lambda = E_i \cdot \mu_i \cdot \mu_{BASE}^{ADJ} \cdot G_i^{ADJ} \cdot H_i^{ADJ} \cdot O_i^{ADJ})$$
+The inclusion of $E_i$ and $\mu_i$ means that our parameters estimates will be relative to our current expected basis.
+
 Where:
 $$
 \begin{align}
@@ -357,9 +362,8 @@ $$
 
 Noting that where males have been chosen as a reference level, an adjustment will only be determined for $G_{FEMALE}$. Similarly, adjustments will only be derived for $H_{BAD}$, $O_{LOW}$ and $O_{HIGH}$ as good health and medium occupation risk are the reference levels respectively.
 
-Because we want adjustments **relative** to our expected position, the GLM approach requires that we provide an "offset-term" equal to the product of $E_i$ and $\mu_i$ as highlighted in <span style="color: red;">red</span> above. That is, we would like a fit relative to our position on **expected deaths**.
+However, the GLM framework requires that we fit a **linear combination** of our parameters meaning that the problem, as currently framed, is not possible. We can instead define:
 
-In order to ensure the resulting Poisson parameter ($\lambda$) remains non-negative, a "log-link" function is used as part of the fitting process. Parameter values are instead sought found for:
 $$
 \begin{align}
   \mu_{BASE}^{ADJ*} &= \operatorname{log}(\mu_{BASE}^{ADJ}) \\
@@ -368,18 +372,21 @@ $$
   O_{LOW}^{ADJ*} &= \operatorname{log}(O_{LOW}^{ADJ}) \\
   O_{HIGH}^{ADJ*} &= \operatorname{log}(O_{HIGH}^{ADJ})
 \end{align}
-$$.
+$$
 
 From these, we define $G_i^{ADJ*}$, $H_i^{ADJ*}$ and $O_i^{ADJ*}$ as expected.
 
-We then look to choose those revised parameters such the the following likelihood is maximised:
+Noting that a similar transformation has also been applied to $E_i \cdot \mu_i$, our problem can then be rewritten as maximising the probability of:
 
 $$D_i \sim \operatorname{Poisson}(\lambda = e^{\operatorname{log}(E_i \cdot \mu_i)} \cdot e^{\mu_{BASE}^{ADJ*}} \cdot e^{G_i^{ADJ*}} \cdot e^{H_i^{ADJ*}} \cdot e^{O_i^{ADJ*}})$$
-Rewriting this in a manner consistent with a log-link function:
+Which is equivalent to:
 
 $$D_i \sim \operatorname{Poisson}(\lambda = \operatorname{exp}\{\operatorname{log}(E_i) + \operatorname{log}(\mu_i) + \mu_{BASE}^{ADJ*} + G_i^{ADJ*} + H_i^{ADJ*} + O_i^{ADJ*}\})$$
+Noting that $\lambda$ has now been written as an exponential transformation of a linear combination of parameters.
 
-The R code uses the standard `glm` function as shown below; note how the structure to the right of `~` is as per the structure shown above.
+Fitting a Poisson distribution is readily possible within the GLM framework, however the exponential transformation above requires that we use a "log-link" function; this is more of an implementation concern and will not be discussed further. It is worth noting though that this transformation ensures that the fitted value for $\lambda$ will always be non-negative, as required for the Poisson distribution.
+
+The R code uses the standard `glm` function as shown below; note how the structure to the right of `~` is as per the structure proposed above:
 
 ```{r runGLMFit, echo = TRUE, include = TRUE, results = 'hide'}
 glmFit <-
@@ -391,8 +398,6 @@ glmFit <-
 ```
 
 Executing this, provides us with the following estimates of $\mu_{BASE}^{ADJ*}$, $G_i^{ADJ*}$, ... and hence $\mu_{BASE}^{ADJ}$, $G_i^{ADJ}$, ... where (for example) $\mu_{BASE}^{ADJ} = \operatorname{exp}(\mu_{BASE}^{ADJ*})$.
-
-<br/>
 
 Note that:
 
@@ -774,7 +779,6 @@ $$\underset{\texttt{POSTERIOR}}{\operatorname{P}(\mu_{BASE}^{ADJ},...,O_{HIGH}^{
 As such, this approach requires us to have a **prior** opinion regarding those parameters estimates, as represented in <span style="color: red;">red</span> above.
 
 Whereas the **vanilla GLM** approach assumes that the parameters have fixed, albeit unknown values, the **Bayesian** approach instead assumes that they themselves are also random, albeit with known distribution; this is a key difference between the two _schools of thought_.
-
 
 ### Determining Posterior Distribution
 

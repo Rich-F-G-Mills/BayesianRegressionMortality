@@ -3034,24 +3034,29 @@ h3 {
 <h2>Purpose</h2>
 <p>The purpose of this note is to show how <strong>Bayesian
 regression</strong> can be used to provide a credibility weighted
-approach to experience analysis.</p>
+approach to the analysis of mortality experience.</p>
+<p>Using a fabricated data-set, the analysis is firstly performed using
+a GLM approach, before repeating the exercise in a Bayesian setting; the
+former being done (if nothing else) to better highlight the benefit of
+the latter.</p>
 </div>
 <div id="background" class="section level2">
 <h2>Background</h2>
-<p>Although it might depend on the product being considered, proposed
-basis changes are made by (at least) considering multiple 1-way analyses
-of actual vs expected experience. Prior to any proposed changes, a
-“mechanical-rule” process is applied to determine whether any such
-departure to expected experience is sufficient enough to warrant a
-change in basis. (<strong>Correct?</strong>).</p>
+<p>For some products/basis items, proposed basis changes are made by (at
+least) considering multiple one-way analyses of actual vs expected
+experience. Prior to any proposed changes, a “mechanical-rule” process
+is applied to determine whether any such departure to expected
+experience is sufficient enough to warrant a change in basis.
+(<strong>Correct?</strong>).</p>
 <p>However, one shortcoming with this approach (in the author’s opinion)
 is that this rule is only being applied when considering individual
 one-way analyses of results. For example, deciding to not change the
 gender loading could mean that another assumption could well need to
 change to compensate for any such (no) change.</p>
 <p>Ideally, any such adjustment should be done considering all basis
-dimensions simultaneously. Through the use of Bayesian regression, we
-can obtain credibility weighted estimates that:</p>
+dimensions simultaneously. Through the use of Bayesian regression (as
+opposed to a “vanilla” GLM regression), we can obtain credibility
+weighted estimates that:</p>
 <ul>
 <li>Considers <strong>all</strong> basis dimensions (eg… gender,
 occupation, …) simultaneously.</li>
@@ -3555,8 +3560,10 @@ change in order to replicate the actual experience.</p>
 <p>Specifically, we would like to find <span class="math inline">\(\mu_{BASE}^{ADJ}\)</span>, <span class="math inline">\(G_i^{ADJ}\)</span>, <span class="math inline">\(H_i^{ADJ}\)</span> and <span class="math inline">\(O_i^{ADJ}\)</span> that maximizes the likelihood
 of:</p>
 <p><span class="math display">\[D_i \sim \operatorname{Poisson}(\lambda
-= \color{red}{E_i} \cdot \color{red}{\mu_i} \cdot \mu_{BASE}^{ADJ} \cdot
-G_i^{ADJ} \cdot H_i^{ADJ} \cdot O_i^{ADJ})\]</span> Where: <span class="math display">\[
+= E_i \cdot \mu_i \cdot \mu_{BASE}^{ADJ} \cdot G_i^{ADJ} \cdot H_i^{ADJ}
+\cdot O_i^{ADJ})\]</span> The inclusion of <span class="math inline">\(E_i\)</span> and <span class="math inline">\(\mu_i\)</span> means that our parameters estimates
+will be relative to our current expected basis.</p>
+<p>Where: <span class="math display">\[
 \begin{align}
   G_i^{ADJ} &amp;=
     \begin{cases}
@@ -3586,14 +3593,10 @@ occupations.}
 adjustment will only be determined for <span class="math inline">\(G_{FEMALE}\)</span>. Similarly, adjustments will
 only be derived for <span class="math inline">\(H_{BAD}\)</span>, <span class="math inline">\(O_{LOW}\)</span> and <span class="math inline">\(O_{HIGH}\)</span> as good health and medium
 occupation risk are the reference levels respectively.</p>
-<p>Because we want adjustments <strong>relative</strong> to our expected
-position, the GLM approach requires that we provide an “offset-term”
-equal to the product of <span class="math inline">\(E_i\)</span> and
-<span class="math inline">\(\mu_i\)</span> as highlighted in <span style="color: red;">red</span> above. That is, we would like a fit
-relative to our position on <strong>expected deaths</strong>.</p>
-<p>In order to ensure the resulting Poisson parameter (<span class="math inline">\(\lambda\)</span>) remains non-negative, a
-“log-link” function is used as part of the fitting process. Parameter
-values are instead sought found for: <span class="math display">\[
+<p>However, the GLM framework requires that we fit a <strong>linear
+combination</strong> of our parameters meaning that the problem, as
+currently framed, is not possible. We can instead define:</p>
+<p><span class="math display">\[
 \begin{align}
   \mu_{BASE}^{ADJ*} &amp;= \operatorname{log}(\mu_{BASE}^{ADJ}) \\
   G_{FEMALE}^{ADJ*} &amp;= \operatorname{log}(G_{FEMALE}^{ADJ}) \\
@@ -3601,21 +3604,28 @@ values are instead sought found for: <span class="math display">\[
   O_{LOW}^{ADJ*} &amp;= \operatorname{log}(O_{LOW}^{ADJ}) \\
   O_{HIGH}^{ADJ*} &amp;= \operatorname{log}(O_{HIGH}^{ADJ})
 \end{align}
-\]</span>.</p>
+\]</span></p>
 <p>From these, we define <span class="math inline">\(G_i^{ADJ*}\)</span>, <span class="math inline">\(H_i^{ADJ*}\)</span> and <span class="math inline">\(O_i^{ADJ*}\)</span> as expected.</p>
-<p>We then look to choose those revised parameters such the the
-following likelihood is maximised:</p>
+<p>Noting that a similar transformation has also been applied to <span class="math inline">\(E_i \cdot \mu_i\)</span>, our problem can then be
+rewritten as maximising the probability of:</p>
 <p><span class="math display">\[D_i \sim \operatorname{Poisson}(\lambda
 = e^{\operatorname{log}(E_i \cdot \mu_i)} \cdot e^{\mu_{BASE}^{ADJ*}}
 \cdot e^{G_i^{ADJ*}} \cdot e^{H_i^{ADJ*}} \cdot e^{O_i^{ADJ*}})\]</span>
-Rewriting this in a manner consistent with a log-link function:</p>
+Which is equivalent to:</p>
 <p><span class="math display">\[D_i \sim \operatorname{Poisson}(\lambda
 = \operatorname{exp}\{\operatorname{log}(E_i) +
 \operatorname{log}(\mu_i) + \mu_{BASE}^{ADJ*} + G_i^{ADJ*} + H_i^{ADJ*}
-+ O_i^{ADJ*}\})\]</span></p>
++ O_i^{ADJ*}\})\]</span> Noting that <span class="math inline">\(\lambda\)</span> has now been written as an
+exponential transformation of a linear combination of parameters.</p>
+<p>Fitting a Poisson distribution is readily possible within the GLM
+framework, however the exponential transformation above requires that we
+use a “log-link” function; this is more of an implementation concern and
+will not be discussed further. It is worth noting though that this
+transformation ensures that the fitted value for <span class="math inline">\(\lambda\)</span> will always be non-negative, as
+required for the Poisson distribution.</p>
 <p>The R code uses the standard <code>glm</code> function as shown
 below; note how the structure to the right of <code>~</code> is as per
-the structure shown above.</p>
+the structure proposed above:</p>
 <pre class="r"><code>glmFit &lt;-
   glm(
     ACTUAL_DEATHS ~ offset(log(EXPOSURE) + log(EXPECTED_RATE)) + GENDER + HEALTH + OCC_RISK,
@@ -3624,7 +3634,6 @@ the structure shown above.</p>
   )</code></pre>
 <p>Executing this, provides us with the following estimates of <span class="math inline">\(\mu_{BASE}^{ADJ*}\)</span>, <span class="math inline">\(G_i^{ADJ*}\)</span>, … and hence <span class="math inline">\(\mu_{BASE}^{ADJ}\)</span>, <span class="math inline">\(G_i^{ADJ}\)</span>, … where (for example) <span class="math inline">\(\mu_{BASE}^{ADJ} =
 \operatorname{exp}(\mu_{BASE}^{ADJ*})\)</span>.</p>
-<p><br /></p>
 <p>Note that:</p>
 <ul>
 <li>Adjustments of 100% have been manually inserted for our reference
