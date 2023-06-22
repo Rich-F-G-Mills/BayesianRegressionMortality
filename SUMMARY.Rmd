@@ -1,5 +1,5 @@
 ---
-title: "Credibility Weighted Mortality Analysis"
+title: "Prior Weighted Mortality Analysis"
 output:
   html_document:
     df_print: paged
@@ -15,6 +15,11 @@ knitr::opts_chunk$set(include = FALSE)
 ```
 
 ```{css echo = FALSE, include = TRUE}
+/* Make top level headers bold in TOC*/
+#TOC > ul > li {
+  font-weight: bold;
+}
+
 /* Although tables are aligned to the left page border, offset this to the right. */
 table {
   margin-left: 30px;
@@ -33,7 +38,7 @@ h2 {
 
 /* Increase the vertical gap above L3 header. */
 h3 {
-  margin-top: 20px;
+  margin-top: 25px;
 }
 ```
 
@@ -47,17 +52,27 @@ library (rstan, warn.conflicts = FALSE, quietly = TRUE)
 ```{r loadCurrentBasis}
 totalRecords <- 100000L
 stanChains <- 4L
-stanIters <- 5000L
+stanIters <- 20000L
+
+# priorParams <-
+#   list(
+#     `BASE|BASE` = c(MEAN = 0.0, SD = 0.01),
+#     `GENDER|FEMALE` = c(MEAN = 0.0, SD = 0.1),
+#     `HEALTH|BAD` = c(MEAN = 0.0, SD = 0.15),
+#     `OCC_RISK|LOW` = c(MEAN = 0.0, SD = 0.01),
+#     `OCC_RISK|HIGH` = c(MEAN = 0.0, SD = 0.25)
+#   )
 
 priorParams <-
   list(
     `BASE|BASE` = c(MEAN = 0.0, SD = 0.01),
-    `GENDER|FEMALE` = c(MEAN = 0.0, SD = 0.1),
-    `HEALTH|BAD` = c(MEAN = 0.0, SD = 0.15),
+    `GENDER|FEMALE` = c(MEAN = 0.0, SD = 0.01),
+    `HEALTH|BAD` = c(MEAN = 0.0, SD = 0.01),
     `OCC_RISK|LOW` = c(MEAN = 0.0, SD = 0.01),
-    `OCC_RISK|HIGH` = c(MEAN = 0.0, SD = 0.4)
+    `OCC_RISK|HIGH` = c(MEAN = 0.0, SD = 0.01)
   )
 
+# Load in our expected basis.
 currentBasis <-
   readxl::read_xlsx(
     path = 'PARAMETERS.XLSX',
@@ -68,6 +83,7 @@ currentBasis <-
   dplyr::mutate(
     LABEL =
       glue::glue('{DIMENSION}|{LEVEL}') %>%
+      # Convert to an ordered factor so that this specific ordering is maintained on visual outputs.
       forcats::fct_inorder(ordered = TRUE)
   )
 ```
@@ -116,17 +132,19 @@ polData <-
     -dplyr::ends_with('LOADING')
   ) %>%
   dplyr::mutate(
+    # Ordered so as particular levels used for GLM reference levels.
     GENDER =
       factor(GENDER, levels = c('MALE', 'FEMALE')),
     HEALTH =
       factor(HEALTH, levels = c('GOOD', 'BAD')),
     OCC_RISK =
       factor(OCC_RISK, levels = c('MEDIUM', 'LOW', 'HIGH')),
+    # Ordered another way for purpose of visuals.
     GENDER_ALT = GENDER,
     HEALTH_ALT = HEALTH,
     OCC_RISK_ALT =
       OCC_RISK %>%
-      factor(levels = c('LOW', 'MEDIUM', 'HIGH'), ordered = TRUE),
+      factor(levels = c('LOW', 'MEDIUM', 'HIGH')),
     EXPOSURE =
       as.integer(totalRecords * PROPORTION),
     ACTUAL_DEATHS =
@@ -144,7 +162,7 @@ polData <-
 
 ## Purpose
 
-The purpose of this note is to show how **Bayesian regression** can be used to provide a credibility weighted approach to the analysis of mortality experience.
+The purpose of this note is to show how **Bayesian regression** can be used as an alternative to a GLM approach when carrying out an experience analysis investigation; furthermore, it can provide a fit of parameter estimates that also allow for any _prior_ belief in what those estimates should be.
 
 Using a fabricated data-set, the analysis is firstly performed using a GLM approach, before repeating the exercise in a Bayesian setting; the former being done (if nothing else) to better highlight the benefit of the latter.
 
@@ -155,11 +173,13 @@ For some products/basis items, proposed basis changes are made by (at least) con
 
 However, one shortcoming with this approach (in the author's opinion) is that this rule is only being applied when considering individual one-way analyses of results. For example, deciding to not change the gender loading could mean that another assumption could well need to change to compensate for any such (no) change.
 
-Ideally, any such adjustment should be done considering all basis dimensions simultaneously. Through the use of Bayesian regression (as opposed to a "vanilla" GLM regression), we can obtain credibility weighted estimates that:
+Ideally, any such adjustment should be done considering all basis dimensions simultaneously. Through the use of Bayesian regression (as opposed to a "vanilla" GLM regression), we can obtain weighted estimates that:
 
 * Considers **all** basis dimensions (eg... gender, occupation, ...) simultaneously.
 * Reflects the amount of exposure underlying corresponding cells.
-* Reflects our prior belief about the **strength** of our current basis.
+* Reflects our **prior beliefs** about what those estimates should be.
+
+Additionally, the Bayesian framework provides a joint probability distribution for our parameter estimates with which we can carry out any analysis/inference as needed.
 
 
 ## Setup
@@ -235,6 +255,7 @@ shiny::tags$table(
           as.character() %>%
           # Treat as already escaped HTML.
           htmltools::HTML() %>%
+          # Set gap between each of the tables to be shown.
           shiny::tags$td(
             style = 'padding-right: 25px; vertical-align: top'
           )
@@ -329,7 +350,7 @@ local({
 
 ## Proposal (Poisson GLM)
 
-With a suitable GLM model specified, we can determine "best-fit" adjustments by which our expected loadings and base rate above should change in order to replicate the actual experience.
+With a suitable GLM model specified, we can determine "best-fit" adjustments by which our expected loadings and base rate above should change in order to best replicate the actual experience.
 
 Specifically, we would like to find $\mu_{BASE}^{ADJ}$, $G_i^{ADJ}$, $H_i^{ADJ}$ and $O_i^{ADJ}$ that maximizes the likelihood of:
 
@@ -382,9 +403,11 @@ $$D_i \sim \operatorname{Poisson}(\lambda = e^{\operatorname{log}(E_i \cdot \mu_
 Which is equivalent to:
 
 $$D_i \sim \operatorname{Poisson}(\lambda = \operatorname{exp}\{\operatorname{log}(E_i) + \operatorname{log}(\mu_i) + \mu_{BASE}^{ADJ*} + G_i^{ADJ*} + H_i^{ADJ*} + O_i^{ADJ*}\})$$
-Noting that $\lambda$ has now been written as an exponential transformation of a linear combination of parameters.
+We now have an expression for $\lambda$ that has been written as the exponential transformation of a linear combination of parameters.
 
-Fitting a Poisson distribution is readily possible within the GLM framework, however the exponential transformation above requires that we use a "log-link" function; this is more of an implementation concern and will not be discussed further. It is worth noting though that this transformation ensures that the fitted value for $\lambda$ will always be non-negative, as required for the Poisson distribution.
+Fitting a Poisson distribution is readily possible within the GLM framework, however the exponential transformation above requires that we use a "log-link" function; however, this is more of an implementation concern. It is worth noting though that this transformation ensures that the fitted value for $\lambda$ will always be non-negative, as required by the Poisson distribution.
+
+### GLM Output
 
 The R code uses the standard `glm` function as shown below; note how the structure to the right of `~` is as per the structure proposed above:
 
@@ -402,7 +425,7 @@ Executing this, provides us with the following estimates of $\mu_{BASE}^{ADJ*}$,
 Note that:
 
 * Adjustments of 100% have been manually inserted for our reference levels.
-* The **proposed rates** are equal to current (ie. expected) rates multiplied by the fitted adjustment.
+* The **proposed rates** are equal to current (ie. expected) rates multiplied by the GLM fitted adjustment.
 
 ```{r getGLMEstimates}
 glmEstimates <-
@@ -438,13 +461,16 @@ glmEstimates <-
     by = c('DIMENSION', 'LEVEL')
   ) %>%
   dplyr::mutate(
-    PROPOSED =
+    GLM_PROPOSED =
       CURRENT * FITTED_ADJUSTMENT
   )
 ```
 
 ```{r showGlMEstimates, include = TRUE}
 glmEstimates %>%
+  dplyr::select(
+    -LABEL
+  ) %>%
   dplyr::mutate_if(
     is.numeric,
     scales::percent_format(accuracy = 0.1)
@@ -470,13 +496,8 @@ glmEstimates %>%
 
 <br/>
 
-Allowing for the newly proposed rates above, we obtain the following:
-
-* As seen, we have a perfect fit between actual and proposed deaths at the **aggregate level**; however, less so at the individual cell level.
-* **Would we always expect a perfect match at the aggregate level?**
-
-```{r augmentPolicyData}
-augmentedPolData <-
+```{r augmentPolicyDataGLM}
+augmentedPolDataGLM <-
   purrr::reduce(
     c('BASE', 'GENDER', 'HEALTH', 'OCC_RISK'),
     function (prior, dimension) {
@@ -493,7 +514,7 @@ augmentedPolData <-
             ) %>%
             dplyr::transmute(
               LEVEL,
-              '{dimension}_LOADING' := PROPOSED
+              '{dimension}_LOADING' := GLM_PROPOSED
             ),
           by = 'LEVEL'
         ) %>%
@@ -509,7 +530,7 @@ augmentedPolData <-
   ) %>%
   dplyr::rowwise() %>%
   dplyr::mutate(
-    PROPOSED_RATE =
+    GLM_RATE =
       prod(
         dplyr::c_across(
           dplyr::ends_with('LOADING')
@@ -526,110 +547,151 @@ augmentedPolData <-
     GENDER,
     HEALTH,
     OCC_RISK,
+    GENDER_ALT,
+    HEALTH_ALT,
+    OCC_RISK_ALT,
     PROPORTION,
     EXPOSURE,
     ACTUAL_RATE,
     EXPECTED_RATE,
-    PROPOSED_RATE,
+    GLM_RATE,
     ACTUAL_DEATHS,
     EXPECTED_DEATHS,
-    PROPOSED_DEATHS =
-      EXPOSURE * PROPOSED_RATE
+    GLM_DEATHS =
+      EXPOSURE * GLM_RATE
   )
 ```
 
-```{r showRevisedFit, include = TRUE}
-local({
-  preTotals <-
-    augmentedPolData %>%
-    dplyr::transmute(
-      GENDER,
-      HEALTH,
-      OCC_RISK,
-      EXPOSURE,
-      ACTUAL_DEATHS,
-      EXPECTED_DEATHS,
-      PROPOSED_DEATHS,
-      ACTUAL_RATE,
-      EXPECTED_RATE,
-      PROPOSED_RATE
-    )
-  
-  totalRow <-
-    augmentedPolData %>%
-    dplyr::summarise(
-      OCC_RISK = 'TOTAL',
-      EXPECTED_RATE = sum(EXPOSURE * EXPECTED_RATE) / sum(EXPOSURE),
-      PROPOSED_RATE = sum(EXPOSURE * PROPOSED_RATE) / sum(EXPOSURE),
-      EXPOSURE = sum(EXPOSURE),
-      ACTUAL_DEATHS = sum(ACTUAL_DEATHS),
-      EXPECTED_DEATHS = sum(EXPECTED_DEATHS),
-      PROPOSED_DEATHS = sum(PROPOSED_DEATHS),
-      ACTUAL_RATE = ACTUAL_DEATHS / EXPOSURE
-    )
-  
-  preTotals %>%
-    dplyr::bind_rows(totalRow) %>%
-    dplyr::transmute(
-      GENDER =
-        GENDER %>%
-        as.character() %>%
-        tidyr::replace_na(replace = ''),
-      HEALTH =
-        HEALTH %>%
-        as.character() %>%
-        tidyr::replace_na(replace = ''),
-      OCC_RISK,
-      EXPOSURE =
-        scales::comma(EXPOSURE),
-      EXPECTED_DEATHS =
-        scales::comma(EXPECTED_DEATHS, accuracy = 1.0),
-      ACTUAL_DEATHS =
-        scales::comma(ACTUAL_DEATHS, accuracy = 1.0),
-      PROPOSED_DEATHS =
-        scales::comma(PROPOSED_DEATHS, accuracy = 1.0),
-      EXPECTED_RATE =
-        scales::percent(EXPECTED_RATE, accuracy = 0.1),
-      ACTUAL_RATE =
-        scales::percent(ACTUAL_RATE, accuracy = 0.1),
-      PROPOSED_RATE =
-        scales::percent(PROPOSED_RATE, accuracy = 0.1)
-    ) %>%
-    knitr::kable(
-      format = 'html',
-      align = 'ccccccc'
-    ) %>%
-    kableExtra::kable_styling(
-      bootstrap_options = 'bordered',
-      full_width = FALSE
-    ) %>%
-    kableExtra::column_spec(
-      column = 1L:3L,
-      background = '#EEEEEE'
-    ) %>%
-    kableExtra::row_spec(
-      row = 0L,
-      bold = TRUE,
-      background = '#BBBBBB'
-    ) %>%
-    kableExtra::row_spec(
-      row = nrow(preTotals) + 1L,
-      bold = TRUE,
-      background = '#EEEEEE'
-    )
-})
+### Proposed Fit {.tabset .tabset-fade .tabset-pills}
+
+Allowing for the newly proposed rates above, we have a perfect fit between actual and proposed deaths at the **aggregate level**; however, less so at the individual cell level.
+
+```{r prepareGLMFitTable}
+glmFitTable <-
+  local({
+    preTotals <-
+      augmentedPolDataGLM %>%
+      dplyr::transmute(
+        GENDER,
+        HEALTH,
+        OCC_RISK,
+        EXPOSURE,
+        ACTUAL_DEATHS,
+        EXPECTED_DEATHS,
+        GLM_DEATHS,
+        ACTUAL_RATE,
+        EXPECTED_RATE,
+        GLM_RATE
+      )
+    
+    totalRow <-
+      augmentedPolDataGLM %>%
+      dplyr::summarise(
+        OCC_RISK = 'TOTAL',
+        EXPECTED_RATE = sum(EXPOSURE * EXPECTED_RATE) / sum(EXPOSURE),
+        GLM_RATE = sum(EXPOSURE * GLM_RATE) / sum(EXPOSURE),
+        EXPOSURE = sum(EXPOSURE),
+        ACTUAL_DEATHS = sum(ACTUAL_DEATHS),
+        EXPECTED_DEATHS = sum(EXPECTED_DEATHS),
+        GLM_DEATHS = sum(GLM_DEATHS),
+        ACTUAL_RATE = ACTUAL_DEATHS / EXPOSURE
+      )
+    
+    preTotals %>%
+      dplyr::bind_rows(totalRow) %>%
+      dplyr::transmute(
+        GENDER =
+          GENDER %>%
+          as.character() %>%
+          tidyr::replace_na(replace = ''),
+        HEALTH =
+          HEALTH %>%
+          as.character() %>%
+          tidyr::replace_na(replace = ''),
+        OCC_RISK,
+        EXPOSURE =
+          scales::comma(EXPOSURE),
+        EXPECTED_DEATHS =
+          scales::comma(EXPECTED_DEATHS, accuracy = 1.0),
+        ACTUAL_DEATHS =
+          scales::comma(ACTUAL_DEATHS, accuracy = 1.0),
+        GLM_DEATHS =
+          scales::comma(GLM_DEATHS, accuracy = 1.0),
+        EXPECTED_RATE =
+          scales::percent(EXPECTED_RATE, accuracy = 0.1),
+        ACTUAL_RATE =
+          scales::percent(ACTUAL_RATE, accuracy = 0.1),
+        GLM_RATE =
+          scales::percent(GLM_RATE, accuracy = 0.1)
+      )
+  })
+
+glmFitFormat <-
+  function (data) {
+    data %>%
+      knitr::kable(
+        format = 'html',
+        align = 'ccccccc'
+      ) %>%
+      kableExtra::kable_styling(
+        bootstrap_options = 'bordered',
+        full_width = FALSE
+      ) %>%
+      kableExtra::column_spec(
+        column = 1L:3L,
+        background = '#EEEEEE'
+      ) %>%
+      kableExtra::row_spec(
+        row = 0L,
+        bold = TRUE,
+        background = '#BBBBBB'
+      ) %>%
+      kableExtra::row_spec(
+        row = nrow(data),
+        bold = TRUE,
+        background = '#EEEEEE'
+      )
+  }
+```
+
+#### Deaths
+
+```{r showGLMDeaths, include = TRUE}
+glmFitTable %>%
+  dplyr::select(
+    -dplyr::ends_with('RATE')
+  ) %>%
+  dplyr::rename_with(
+    stringr::str_remove,
+    pattern = '_DEATHS$'
+  ) %>%
+  glmFitFormat()
+```
+
+#### Rates
+
+```{r showGLMRates, include = TRUE}
+glmFitTable %>%
+  dplyr::select(
+    -dplyr::ends_with('DEATHS')
+  ) %>%
+  dplyr::rename_with(
+    stringr::str_remove,
+    pattern = '_RATE$'
+  ) %>%
+  glmFitFormat()
 ```
 
 We can visualise this in a waterfall graph as shown below:
 
 * Within each cell grouping, the top bar represents the difference between **actual** and **expected** deaths.
-* The lower bar represents the differencebetween **actual** deaths and deaths as would be expected under the newly **proposed** basis; <span style="color: green;">green</span>/<span style="color: red;">red</span> indicate a better/worse fit respectively between the proposed and actual deaths, relative to those originally expected.
+* The lower bar represents the difference between **actual** deaths and deaths as would be expected under the newly **proposed GLM** basis; <span style="color: green;">green</span>/<span style="color: red;">red</span> indicate a closer/further fit respectively between the proposed and actual deaths, relative to those originally expected.
 * As seen, some cells subsequently achieve a closer fit but not all.
 
-```{r showWaterfallGraph, include = TRUE}
+```{r showWaterfallGraphGLM, include = TRUE}
 local({
   plotData <-
-    augmentedPolData %>%
+    augmentedPolDataGLM %>%
     dplyr::mutate(
       IDX =
         rev(dplyr::row_number()),
@@ -641,12 +703,12 @@ local({
         ),
       ACTUAL_HJUST =
         1.0 - EXPECTED_HJUST,
-      PROPOSED_HJUST =
+      GLM_HJUST =
         dplyr::if_else(
-          PROPOSED_DEATHS < ACTUAL_DEATHS, 1.0, 0.0
+          GLM_DEATHS < ACTUAL_DEATHS, 1.0, 0.0
         ),
-      PROPOSED_IS_BETTER =
-        (PROPOSED_DEATHS - ACTUAL_DEATHS)^2 < (EXPECTED_DEATHS - ACTUAL_DEATHS)^2
+      GLM_IS_BETTER =
+        (GLM_DEATHS - ACTUAL_DEATHS)^2 < (EXPECTED_DEATHS - ACTUAL_DEATHS)^2
     )
   
   ggplot(data = plotData) +
@@ -677,8 +739,8 @@ local({
         xmin = IDX - 0.5,
         xmax = IDX,
         ymin = ACTUAL_DEATHS,
-        ymax = PROPOSED_DEATHS,
-        fill = PROPOSED_IS_BETTER
+        ymax = GLM_DEATHS,
+        fill = GLM_IS_BETTER
       )
     ) +
     geom_segment(
@@ -686,8 +748,8 @@ local({
         x= IDX - 0.25,
         xend = IDX - 0.25,
         y = ACTUAL_DEATHS,
-        yend = PROPOSED_DEATHS,
-        colour = PROPOSED_IS_BETTER
+        yend = GLM_DEATHS,
+        colour = GLM_IS_BETTER
       ),
       arrow =
         ggplot2::arrow(
@@ -717,8 +779,8 @@ local({
     geom_text(
       aes(
         x = IDX - 0.25,
-        y = PROPOSED_DEATHS,
-        hjust = PROPOSED_HJUST
+        y = GLM_DEATHS,
+        hjust = GLM_HJUST
       ),
       label = 'P',
       vjust = 0.5
@@ -740,7 +802,7 @@ local({
     ) +
     coord_flip() +
     ggtitle(
-      label = 'Walk from Expected 🡆 Actual 🡆 Proposed'
+      label = 'Walk from Expected 🡆 Actual 🡆 GLM Proposed'
     ) +
     cowplot::theme_half_open() +
     cowplot::background_grid(major = 'xy', minor = 'none') +
@@ -754,7 +816,7 @@ local({
 
 ### Summary
 
-Although a perfect fit has been obtained at the **aggregate** level, the fitting process has ignored any prior belief/faith we have in our current expected basis.
+Although a perfect fit has been obtained at the **aggregate** level, the fitting process has ignored any prior beliefs we might have in our current expected basis.
 
 It would be preferable if the fitting process could explicitly consider our preference for the current basis, quantified in some manner, departing only where the extent of movement and/or quantity of data demands it.
 
@@ -763,11 +825,11 @@ Such an approach is possible with Bayesian regression as described below.
 
 ## Proposal (Bayesian)
 
-The parameter estimates underlying the GLM approach above are derived via maximum-likelihoods; specifically, the parameter estimates are determined such that the probability of getting the actual observations, conditional on those parameter estimates, is maximised:
+The parameter estimates underlying the GLM framework above are derived via a maximum-likelihood approach; specifically, the parameter estimates are determined such that the probability of getting the actual observations, conditional on those parameter estimates, is maximised:
 
 $$\underset{\mu_{BASE}^{ADJ},G_{FEMALE}^{ADJ},...,O_{HIGH}^{ADJ}}{\operatorname{arg max}}\operatorname{P}(D_i|E_i,\mu_{BASE}^{ADJ},G_{FEMALE}^{ADJ},...,O_{HIGH}^{ADJ})$$
 
-Under the Bayesian approach, we "flip" this around and instead look at the **posterior distribution** of those parameters given the data, rather than point-estimates for those parameters. Via Bayes theorem, it can be shown that:
+Under the Bayesian approach, we "flip" this around and instead look at the **posterior distribution** of those parameters given the data, rather than point-estimates for those parameters. That is, the probability of those parameter estimates given the data. Via Bayes theorem, it can be shown that:
 
 $$\underset{\texttt{POSTERIOR}}{\operatorname{P}(\mu_{BASE}^{ADJ},...,O_{HIGH}^{ADJ}|D_i,E_i)} \propto \underset{\texttt{LIKELIHOOD}}{\operatorname{P}(D_i|E_i,\mu_{BASE}^{ADJ},...,O_{HIGH}^{ADJ})} \cdot \underset{\texttt{PRIOR}}{\operatorname{P}(\mu_{BASE}^{ADJ}...,O_{HIGH}^{ADJ})}$$
 Specifically, that our **posterior** parameter distribution is proportional to our **likelihood** (as underlying the GLM approach) multiplied by the **prior** parameter distribution. Underlying the right-hand side of the above, there is a normalisation constant which can be ignored for purpose of this discussion.
@@ -778,7 +840,7 @@ $$\underset{\texttt{POSTERIOR}}{\operatorname{P}(\mu_{BASE}^{ADJ},...,O_{HIGH}^{
 
 As such, this approach requires us to have a **prior** opinion regarding those parameters estimates, as represented in <span style="color: red;">red</span> above.
 
-Whereas the **vanilla GLM** approach assumes that the parameters have fixed, albeit unknown values, the **Bayesian** approach instead assumes that they themselves are also random, albeit with known distribution; this is a key difference between the two _schools of thought_.
+Whereas the **vanilla GLM** approach assumes that the parameters have fixed, albeit unknown values, the **Bayesian** approach instead assumes that they themselves are also random, but with a known distribution; this highlights one such difference between these two approaches.
 
 ### Determining Posterior Distribution
 
@@ -799,11 +861,11 @@ Therefore, an alternative needs to be found that can search our highly-dimension
 
 Irrespective of the methods above, we require a set of prior assumptions as to our basis adjustments.
 
-During the discussion of the GLM approach, reference was made to a "log-link" function; this is still required here in order to ensure that the overall Poisson rate parameter ($\lambda$) remains non-negative. This required the introduction of $\mu_{BASE}^{ADJ*}$, ..., $O_i^{ADJ*}$.
+During the discussion of the GLM approach, reference was made to a "log-link" function; this is still required here in order to ensure that the overall Poisson rate parameter ($\lambda$) remains non-negative. This required the introduction of $\mu_{BASE}^{ADJ*}$, ..., $O_i^{ADJ*}$ which will also be used here.
 
-Any prior assumptions we make will be regarding those $*$ versions referred to above.
+Any prior assumptions we make will be regarding those same $*$ versions referred to above.
 
-We _might_ therefore assume "tight" variances, placing greater weight on the current expected basis; noting that although we do not _expect_ any movements (ie. all have zero mean), we do however accept that there is some underlying variation.
+We _might_ therefore assume "tight" variances, placing greater weight on the current expected basis; noting that although we do not _expect_ any movements (ie. all have zero mean), we do however accept that there is some underlying variation, the extent of which can (if desired) differ by parameter.
 
 $$\begin{aligned}
   \operatorname{log}(\mu_{BASE}^{ADJ}) &= \mu_{BASE}^{ADJ*} &\sim \operatorname{Normal}(`r priorParams[['BASE|BASE']]['MEAN']`, `r priorParams[['BASE|BASE']]['SD']`) \\
@@ -876,7 +938,7 @@ stanFit <-
           D_actual = polData$ACTUAL_DEATHS
         )
     )
-  }, hash = list(stanCode, priorParams), dir = 'cache/')
+  }, hash = list(stanCode, priorParams, stanChains, stanIters, stanModelMatrix, polData), dir = 'cache/')
 ```
 
 ```{r extractStanSamples}
@@ -896,6 +958,7 @@ stanSamples <-
 stanEstimates <-
   currentBasis %>%
   dplyr::mutate(
+    # This is done so that we don't lose the factor type on the LABEL column after joining.
     LABEL_CHAR =
       as.character(LABEL)
   ) %>%
@@ -925,7 +988,7 @@ stanEstimates <-
       FITTED_ADJUSTMENT %>%
       tidyr::replace_na(replace = 1.0),
     CURRENT = RATE,
-    PROPOSED =
+    BAYESIAN_PROPOSED =
       CURRENT * FITTED_ADJUSTMENT
   )
 ```
@@ -938,8 +1001,8 @@ Running this for `r scales::comma(nrow(stanSamples))` iterations has provided us
 
 * A density plot of the **marginal** posterior distributions for each parameter along the diagonal.
 * A heat map of the joint posterior distribution for each pair of parameters in the lower-left portion; the dashed lines intersect at the corresponding estimates for each parameter.
-  * This shows the extent of any pairwise correlations and the level of uncertainty over our parameter values.
-  * All other things equal, the uncertainty could be reduced if (for example), our prior variances were reduced, or an increased number of samples were run.
+  * This also shows (visually) the extent of any pairwise correlations and the level of uncertainty over our parameter values.
+  * All other things equal, the uncertainty could be reduced if (for example), our prior variances were reduced, and/or an increased number of samples were run.
 * Pairwise correlations in the upper-right portion.
   * Note the negative correlation of the base adjustment ($\mu_{BASE}^{ADJ}$) with all other parameters. Intuitively, this makes sense as any increase in the base adjustment would require a corresponding reduction in all other loadings which are cumulatively applied to it.
 
@@ -959,8 +1022,15 @@ local({
         list(
           continuous = 
             function(data, mapping, ...) {
-              xMapping <- mapping$x %>% rlang::f_rhs() %>% as.character()
-              yMapping <- mapping$y %>% rlang::f_rhs() %>% as.character()
+              xMapping <-
+                mapping$x %>%
+                rlang::f_rhs() %>%
+                as.character()
+              
+              yMapping <-
+                mapping$y %>%
+                rlang::f_rhs() %>%
+                as.character()
               
               stanXMean = stanEstimatesVector[xMapping]
               stanYMean = stanEstimatesVector[yMapping]
@@ -1011,6 +1081,9 @@ local({
     )
 })
 ```
+
+
+### Posteriors vs Priors
 
 Extending this further, it would be of interest to see how the marginal distributions along the diagonal compared against our original priors and the point-estimates as provided by the GLM approach.
 
@@ -1184,7 +1257,7 @@ local({
   ) +
   scale_colour_manual(
     name = 'Estimates:',
-    labels = c(GLM = 'GLM', POSTERIOR_ESTIMATE = 'Posterior'),
+    labels = c(GLM = 'GLM', POSTERIOR_ESTIMATE = 'Bayesian'),
     values = c(GLM = 'black', POSTERIOR_ESTIMATE = 'red')
   ) +
   scale_x_continuous(
@@ -1204,3 +1277,208 @@ local({
   )
 })
 ```
+
+```{r augmentPolicyDataBayesian}
+augmentedPolDataBayesian <-
+  purrr::reduce(
+    c('BASE', 'GENDER', 'HEALTH', 'OCC_RISK'),
+    function (prior, dimension) {
+      prior %>%
+        # Without this, we seem to lose the ordered factors within
+        # the respective dimensional columns.
+        dplyr::mutate(
+          LEVEL = .data[[dimension]]
+        ) %>%
+        dplyr::left_join(
+          stanEstimates %>%
+            dplyr::filter(
+              DIMENSION == dimension
+            ) %>%
+            dplyr::transmute(
+              LEVEL,
+              '{dimension}_LOADING' := BAYESIAN_PROPOSED
+            ),
+          by = 'LEVEL'
+        ) %>%
+        dplyr::select(
+          -LEVEL
+        )
+    },
+    .init =
+      augmentedPolDataGLM %>%
+      dplyr::mutate(
+        BASE = 'BASE'
+      )
+  ) %>%
+  dplyr::rowwise() %>%
+  dplyr::mutate(
+    BAYESIAN_RATE =
+      prod(
+        dplyr::c_across(
+          dplyr::ends_with('LOADING')
+        )
+      )
+  ) %>%
+  dplyr::ungroup() %>%
+  dplyr::arrange(
+    GENDER_ALT,
+    HEALTH_ALT,
+    OCC_RISK_ALT
+  ) %>%
+  dplyr::transmute(
+    GENDER,
+    HEALTH,
+    OCC_RISK,
+    GENDER_ALT,
+    HEALTH_ALT,
+    OCC_RISK_ALT,
+    PROPORTION,
+    EXPOSURE,
+    ACTUAL_RATE,
+    EXPECTED_RATE,
+    GLM_RATE,
+    BAYESIAN_RATE,
+    ACTUAL_DEATHS,
+    EXPECTED_DEATHS,
+    GLM_DEATHS =
+      EXPOSURE * GLM_RATE,
+    BAYESIAN_DEATHS =
+      EXPOSURE * BAYESIAN_RATE
+  )
+```
+
+### Proposed Fit {.tabset .tabset-fade .tabset-pills}
+
+```{r prepareBayesianFitTable}
+bayesianFitTable <-
+  local({
+    preTotals <-
+      augmentedPolDataBayesian %>%
+      dplyr::transmute(
+        GENDER,
+        HEALTH,
+        OCC_RISK,
+        EXPOSURE,
+        ACTUAL_DEATHS,
+        EXPECTED_DEATHS,
+        GLM_DEATHS,
+        BAYESIAN_DEATHS,
+        ACTUAL_RATE,
+        EXPECTED_RATE,
+        GLM_RATE,
+        BAYESIAN_RATE
+      )
+    
+    totalRow <-
+      augmentedPolDataBayesian %>%
+      dplyr::summarise(
+        OCC_RISK = 'TOTAL',
+        EXPECTED_RATE = sum(EXPOSURE * EXPECTED_RATE) / sum(EXPOSURE),
+        GLM_RATE = sum(EXPOSURE * GLM_RATE) / sum(EXPOSURE),
+        BAYESIAN_RATE = sum(EXPOSURE * BAYESIAN_RATE) / sum(EXPOSURE),
+        EXPOSURE = sum(EXPOSURE),
+        ACTUAL_DEATHS = sum(ACTUAL_DEATHS),
+        EXPECTED_DEATHS = sum(EXPECTED_DEATHS),
+        GLM_DEATHS = sum(GLM_DEATHS),
+        BAYESIAN_DEATHS = sum(BAYESIAN_DEATHS),
+        ACTUAL_RATE = ACTUAL_DEATHS / EXPOSURE
+      )
+    
+    preTotals %>%
+      dplyr::bind_rows(totalRow) %>%
+      dplyr::transmute(
+        GENDER =
+          GENDER %>%
+          as.character() %>%
+          tidyr::replace_na(replace = ''),
+        HEALTH =
+          HEALTH %>%
+          as.character() %>%
+          tidyr::replace_na(replace = ''),
+        OCC_RISK,
+        EXPOSURE =
+          scales::comma(EXPOSURE),
+        EXPECTED_DEATHS =
+          scales::comma(EXPECTED_DEATHS, accuracy = 1.0),
+        ACTUAL_DEATHS =
+          scales::comma(ACTUAL_DEATHS, accuracy = 1.0),
+        GLM_DEATHS =
+          scales::comma(GLM_DEATHS, accuracy = 1.0),
+        BAYESIAN_DEATHS =
+          scales::comma(BAYESIAN_DEATHS, accuracy = 1.0),
+        EXPECTED_RATE =
+          scales::percent(EXPECTED_RATE, accuracy = 0.1),
+        ACTUAL_RATE =
+          scales::percent(ACTUAL_RATE, accuracy = 0.1),
+        GLM_RATE =
+          scales::percent(GLM_RATE, accuracy = 0.1),
+        BAYESIAN_RATE =
+          scales::percent(BAYESIAN_RATE, accuracy = 0.1)
+      )
+  })
+
+bayesianFitFormat <-
+  function (data) {
+    data %>%
+      knitr::kable(
+        format = 'html',
+        align = 'cccccccc'
+      ) %>%
+      kableExtra::kable_styling(
+        bootstrap_options = 'bordered',
+        full_width = FALSE
+      ) %>%
+      kableExtra::column_spec(
+        column = 1L:3L,
+        background = '#EEEEEE'
+      ) %>%
+      kableExtra::row_spec(
+        row = 0L,
+        bold = TRUE,
+        background = '#BBBBBB'
+      ) %>%
+      kableExtra::row_spec(
+        row = nrow(data),
+        bold = TRUE,
+        background = '#EEEEEE'
+      )
+  }
+```
+
+#### Deaths
+
+```{r showBayesianDeaths, include = TRUE}
+bayesianFitTable %>%
+  dplyr::select(
+    -dplyr::ends_with('RATE')
+  ) %>%
+  dplyr::rename_with(
+    stringr::str_remove,
+    pattern = '_DEATHS$'
+  ) %>%
+  bayesianFitFormat()
+```
+
+#### Rates
+
+```{r showBayesianRates, include = TRUE}
+bayesianFitTable %>%
+  dplyr::select(
+    -dplyr::ends_with('DEATHS')
+  ) %>%
+  dplyr::rename_with(
+    stringr::str_remove,
+    pattern = '_RATE$'
+  ) %>%
+  bayesianFitFormat()
+```
+
+### Summary
+
+By using a Bayesian approach when fitting to our actual experience, we are better able to allow for any prior beliefs we might have for our current basis. Furthermore, this is considered holistically as opposed to the current mechanical-rules approach.
+
+However, there are some additional considerations:
+
+* Additional complexity that needs to be explained/justified.
+* Reasoning for direction and extent of posterior estimates not always obvious.
+* Distributions have to be derived for our prior estimates.
