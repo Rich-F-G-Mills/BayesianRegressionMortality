@@ -195,7 +195,7 @@ $$
   G_i &=
     \begin{cases}
       1, & \text{if }i^{th}\text{ cell is for males.} \\
-      G_{MALE}, & \text{if }i^{th}\text{ cell is for females.}
+      G_{FEMALE}, & \text{if }i^{th}\text{ cell is for females.}
     \end{cases} \\[2.0ex]
   H_i &=
     \begin{cases}
