@@ -562,6 +562,8 @@ augmentedPolDataGLM <-
   )
 ```
 
+:::: {}
+
 ### Proposed Fit {.tabset .tabset-fade .tabset-pills}
 
 Allowing for the newly proposed rates above, we have a perfect fit between actual and proposed deaths at the **aggregate level**; however, less so at the individual cell level.
@@ -681,6 +683,8 @@ glmFitTable %>%
   ) %>%
   glmFitFormat()
 ```
+
+::::
 
 We can visualise this in a waterfall graph as shown below:
 
